@@ -1,118 +1,46 @@
 #!/usr/bin/env python3
 import sys
-
+import math
 from armpy.gen2_teleop import Gen2Teleop
 import rospy
 import kinova_msgs.msg
 import sensor_msgs.msg
 import geometry_msgs.msg
 import time
-
+import traceback
 from collections import deque
+from std_msgs.msg import Int32
+import armpy
+import tf2_ros
+import tf2_geometry_msgs
+from visualization_msgs.msg import Marker
 
-class JointTorquesController:
-    def __init__(self, timer_period = 2):
-        self.joint_torque_listener =rospy.Subscriber("/j2s7s300_driver/out/joint_torques", kinova_msgs.msg.JointAngles, self.jointtorques_callback)
-        print("started joint torque listener")
-        self._arm_listener = rospy.Subscriber("/j2s7s300_driver/out/joint_state", sensor_msgs.msg.JointState, self.joint_state_callback)
-        print("started armstate listener")
-        self.jtcounter = 0
-        self.counter = 0
-        self.starttime = rospy.Time.now()
-        self._controller_timer = rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
-        self.j1threshold = .5 # how much force on j1 before it moves
-        self.jtaverager = kinova_msgs.msg.JointAngles(0,0,0,0,0,0,0)
-        self.teleop = Gen2Teleop(ns="/j2s7s300_driver")
-        # initialize the twist message we will use to move the arm
-        self.twist = geometry_msgs.msg.Twist()
-        self.twist.linear.x = 0
-        self.twist.linear.y = 0
-        self.twist.linear.z = 0
-        self.twist.angular.x = 0
-        self.twist.angular.y = 0
-        self.twist.angular.z = 0
+global history
 
-        # this one will be static and be our estop
-        self.stop = geometry_msgs.msg.Twist()
-        self.stop.linear.x = 0
-        self.stop.linear.y = 0
-        self.stop.linear.z = 0
-        self.stop.angular.x = 0
-        self.stop.angular.y = 0
-        self.stop.angular.z = 0
-        
-
-    def jointtorques_callback(self, jointtorquedata):
-        # right-append the new joint torque data to the queue
-        self._jointtorquedata = jointtorquedata
-         
-
-        if self.jtcounter < 10:
-            self.jtcounter = self.jtcounter + 1
-            self.jtaverager.joint1 = self.jtaverager.joint1 +jointtorquedata.joint1
-            self.jtaverager.joint2 = self.jtaverager.joint2 + jointtorquedata.joint2
-            self.jtaverager.joint3 = self.jtaverager.joint3 + jointtorquedata.joint3
-            self.jtaverager.joint4 = self.jtaverager.joint4 + jointtorquedata.joint4
-            self.jtaverager.joint5 = self.jtaverager.joint5 + jointtorquedata.joint5
-            self.jtaverager.joint6 = self.jtaverager.joint6 + jointtorquedata.joint6
-            self.jtaverager.joint7 = self.jtaverager.joint7 + jointtorquedata.joint7
-            
-            
-           # print(self.jtaverager)
-            
-
-        else:
-            #print("the joint torques are", jointtorquedata)
-            self.jtaverager.joint1 = self.jtaverager.joint1/10
-            self.jtaverager.joint2 = self.jtaverager.joint2/10
-            self.jtaverager.joint3 = self.jtaverager.joint3/10
-            self.jtaverager.joint4 = self.jtaverager.joint4/10
-            self.jtaverager.joint5 = self.jtaverager.joint5/10
-            self.jtaverager.joint6 = self.jtaverager.joint6/10
-            self.jtaverager.joint7 = self.jtaverager.joint7/10
-            
-        #print("the average over the last 100 messages is ", self.jtaverager)
-            if self._jointtorquedata.joint1 > self.jtaverager.joint1 + self.j1threshold:
-                difference = (self._jointtorquedata.joint1-self.jtaverager.joint1)
-                print("we would move in +x by ", difference)
-                self.twist.linear.x = .2*difference
-                self.teleop.set_velocity(self.twist)
-
-            elif self._jointtorquedata.joint1 < self.jtaverager.joint1-self.j1threshold:
-                difference = (self._jointtorquedata.joint1-self.jtaverager.joint1)
-                print("we would move in -x by", difference)
-                self.twist.linear.x = .2*difference
-                self.teleop.set_velocity(self.twist)
-
-                
-            self.jtcounter = 0
-            
-    def timer_callback(self, event):
-        #print(f"The Time since start is {(event.current_real-self.starttime).to_sec():.03f}")
-        pass
-
-
-
-        # this is the logic to compare the arm torque data and
-        # set the velocity of the arm appropriately.
-
-        # because we are moving short distances with a small loop,
-        # we will use J1 torques as if they were x+- commands
-        # (should also be y depending on angle)
-        # and J2 torques as if they were z+- commands
-        # this is a total hack and should get replaced with some real kinematic solution, but we will use the F-T sensor for that.
-    def joint_state_callback(self, data): 
-        if self.counter < 10:
-            self.counter = self.counter + 1
-        else:
-            #print(data.name)
-            self.counter = 0
-        self._jointdata = data
-    
+#FIXME - talk to Reuben
+history = [[],[],[],[],[],[]]
+average = [0,0,0,0,0,0]
 
 class ForceTorqueController:
-    def __init__(self, timer_period = 2): # starts when you make the class
-        self._bota_listener = rospy.Subscriber("bus0/ft_sensor0/ft_sensor_readings/wrench", geometry_msgs.msg.WrenchStamped, self.bota_callback)
+    def __init__(self, timer_period = 1): # starts when you make the class
+        # timer_period is in seconds
+
+        self.teleop = Gen2Teleop(ns="/j2s7s300_driver")
+        self.tfBuffer = tf2_ros.Buffer()
+        self.tflistener = tf2_ros.TransformListener(self.tfBuffer)
+        
+        arm = armpy.arm.Arm()
+        arm.set_velocity(.5)
+        startposition = [4.721493795519453,4.448460661610131,-0.016183561810626166,1.5199463284150871,3.0829157579242956,4.517873824894174,1.57]
+        arm.move_to_joint_pose(startposition)
+
+
+        #        self._bota_listener = rospy.Subscriber("/bus0/bota_ftsensor/ft_sensor_readings/wrench", geometry_msgs.msg.WrenchStamped, self.bota_callback)
+        self._rviz_publisher = rospy.Publisher("/visualization_marker", Marker, queue_size = 2)
+        
+        # this listens to the data that has been zeroed based on
+        # sensor position with the "gravity compensation" package
+        self._bota_listener = rospy.Subscriber("/ft_sensor/ft_compensated", geometry_msgs.msg.WrenchStamped, self.bota_callback)
         print("started bota listener")
         self._arm_listener = rospy.Subscriber("/j2s7s300_driver/out/joint_state", sensor_msgs.msg.JointState, self.joint_state_callback)
         print("started armstate listener")
@@ -120,8 +48,33 @@ class ForceTorqueController:
         self.botacounter = 0
         self.starttime = rospy.Time.now()
         self._controller_timer = rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
+
         
-    def bota_callback(self, botadata):
+         
+        # initialize the twist message we will use to move the arm
+        self.twist = geometry_msgs.msg.Twist()
+        self.twist.linear.x = 0
+        print("Twist x", self.twist.linear.x)
+        self.twist.linear.y = 0
+        self.twist.linear.z = 0
+        self.twist.angular.x = 0
+        self.twist.angular.y = 0
+        self.twist.angular.z = 0
+
+        # this one will be static and be our estop
+
+        self.estop = geometry_msgs.msg.Twist()
+        self.estop.linear.x = 0
+        self.estop.linear.y = 0
+        self.estop.linear.z = 0
+        self.estop.angular.x = 0
+        self.estop.angular.y = 0
+        self.estop.angular.z = 0
+
+
+        
+    def bota_callback(self, msg):
+        #print("inside the bota callback")
         #geometry_msgs.msg._Wrench.Wrench
         #Vector3  force
         #float64 x
@@ -131,16 +84,48 @@ class ForceTorqueController:
         #float64 x
         #float64 y
         #float64 z
-        self._botadata = botadata
-      #  if self._botadata > something:
-        if self.botacounter < 100:
-            self.botacounter = self.botacounter + 1
-        else:
-            #print("the Bota time is", botadata.header)
-            #print(botadata.wrench)
-            self.botacounter = 0
+        self._botadata = msg # sets up the time
 
+        history[0].append(msg.wrench.force.x)
+        history[1].append(msg.wrench.force.y)
+        history[2].append(msg.wrench.force.z)
+        history[3].append(msg.wrench.torque.x)
+        history[4].append(msg.wrench.torque.y)
+        history[5].append(msg.wrench.torque.z)
+        # print(history)
+        for i, value in enumerate(history):
+            if len(history[i]) > 30:
+                history[i] = history[i][-30:]
+                average[i] = round(sum(history[i]) / float(len(history[i])), 1)
+        self._botadata.wrench.force.x=average[0]
+        self._botadata.wrench.force.y=average[1]
+        self._botadata.wrench.force.z=average[2]
+        self._botadata.wrench.torque.x=average[3]
+        self._botadata.wrench.torque.y=average[4]
+        self._botadata.wrench.torque.z=average[5]
+        #print("Botadata from inside callback", self._botadata)
+        botamarker = Marker()
+        botamarker.type = 0
+        botamarker.header=self._botadata.header
+        botamarker.id = 2
+        botamarker.scale.x = math.sqrt((self._botadata.wrench.force.x)**2+(self._botadata.wrench.force.y)**2+(self._botadata.wrench.force.z)**2)
+        botamarker.scale.y = .1
+        botamarker.scale.z = .1
+        # at the origin of the frame
+        botamarker.pose.position.x = 0
+        botamarker.pose.position.y = 0
+        botamarker.pose.position.z = 0
+        botamarker.color.r = 1
+        botamarker.color.g = 0
+        botamarker.color.b = 1
+        botamarker.color.a = 1
+        #
+        botamarker.pose.orientation.x = self._botadata.wrench.force.x
+        botamarker.pose.orientation.y = self._botadata.wrench.force.y
+        botamarker.pose.orientation.z = self._botadata.wrench.force.z
+        self._rviz_publisher.publish(botamarker)
 
+        
     def joint_state_callback(self, data):
         # the data comes in as sensor_msgs/JointState.msg
         # which is
@@ -149,100 +134,151 @@ class ForceTorqueController:
         #float64[] velocity
         #float64[] effort
 
-        if self.counter < 10:
-            self.counter = self.counter + 1
-        else:
+#        if self.counter < 10:
+#            self.counter = self.counter + 1
+#        else:
             #print(data.name)
-            self.counter = 0
+#            self.counter = 0
         self._jointdata = data
-    
+
+    def scaleforce(self, force, scalingfactor):
+        scaledforce = [scalingfactor*x for x in force]
+        print("scaledforce is ", scaledforce)
+        return scaledforce
+
     def timer_callback(self, event):
-        print("The Time since start is {(event.current_real-self.starttime).to_sec():.03f}")
+        print("The Time since start is ", event.current_real-self.starttime)
         # this is the logic to compare the bota data and
         # set the velocity of the arm appropriately.
-        xneutral = 3.17
-        xdelta = 2
-        yneutral = 2.7
-        ydelta = 2
-        zneutral = 184
-        zdelta = 10
-        if self._botadata.wrench.force.x > xneutral+xdelta:
-            print("move x plus ", self._botadata.wrench.force.x)
-        elif self._botadata.wrench.force.x < xneutral-xdelta:
-            print("move x minus ", self._botadata.wrench.force.x)
-        elif self._botadata.wrench.force.y > yneutral+ydelta:
-            print("move y plus ", self._botadata.wrench.force.y)
-        elif self._botadata.wrench.force.y < yneutral-ydelta:
-            print("move y minus ", self._botadata.wrench.force.y)
-        elif self._botadata.wrench.force.z > zneutral + zdelta:
-            print("move z plus ", self._botadata.wrench.force.z)
-        elif self._botadata.wrench.force.z < zneutral - zdelta:
-            print("move z-minus ", self._botadata.wrench.force.z)
-        else:
-            print(".")
-    
+        try:
+            #print("BotaData is now", self._botadata) # averaged data
+            force = [0,0,0,0,0,0]
+
+            # now we do something
+
+            force[0]=self._botadata.wrench.force.x
+            force[1]=self._botadata.wrench.force.y
+            force[2]=self._botadata.wrench.force.z
+            force[3]=self._botadata.wrench.torque.x
+            force[4]=self._botadata.wrench.torque.y
+            force[5]=self._botadata.wrench.torque.z
+
+            print("force is", force)
+
+            force = self.deadband(force, 2)
+            scaledforce = self.scaleforce(force, .2)
+
+
+            # this creates a desired vector to move along
+            # in the frame of reference of the F/T sensor
+            # based on the force inputs
+            
+            outputvectorstamped = self.force2Vector(scaledforce, self._botadata.header)
+            torques = self.force2Vector([scaledforce[3],scaledforce[4], scaledforce[5]], self._botadata.header) 
+            # This converts it to the base frame, which is needed for
+            # Kinova velocity control (the Twist command we will make)
+            # and returns the output vector in the base frame
+
+            #print("\n\n\n output vector \n\n\n", outputvectorstamped)
+
+
+            outputvectorstamped_base = self.tfBuffer.transform(outputvectorstamped,"j2s7s300_link_base",timeout=rospy.Duration(10.0))
+            
+            # This converts the base-frame output vector
+            # into Twist translation commands
+            converted_twist = self.Vector2Twist(outputvectorstamped_base.header, outputvectorstamped.vector, torques.vector) #TwistStamped
+            # sets the current twist/robot velocity to be equal to twist
+            # this will make the robot move!
+            print("The velocity twist command I would send is", converted_twist.twist)
+            convertedMarker = Marker()
+            convertedMarker.type = 0
+            convertedMarker.header=converted_twist.header
+            convertedMarker.id = 1
+            convertedMarker.scale.x = math.sqrt((converted_twist.twist.linear.x)**2+(converted_twist.twist.linear.y)**2+(converted_twist.twist.linear.z)**2)
+            convertedMarker.scale.y = .1
+            convertedMarker.scale.z = .1
+            # at the origin of the frame
+            convertedMarker.pose.position.x = 0
+            convertedMarker.pose.position.y = 0
+            convertedMarker.pose.position.z = 0
+            convertedMarker.color.r = 0
+            convertedMarker.color.g = 1
+            convertedMarker.color.b = 1
+            convertedMarker.color.a = 1
+            #
+            convertedMarker.pose.orientation.x = converted_twist.twist.linear.x
+            convertedMarker.pose.orientation.y = converted_twist.twist.linear.y
+            convertedMarker.pose.orientation.z = converted_twist.twist.linear.z
+            self._rviz_publisher.publish(convertedMarker)
+           # self.teleop.set_velocity(converted_twist.twist)
         
-  ######################        
 
-    
+        
+            
+        except Exception as e:
+            print("exception is", e)
+            print(traceback.format_exc())
+            time.sleep(20)
+            print("Waiting 20 seconds for init")
+            self.teleop.set_velocity(self.estop)
+            
 
-###############
-    #armpy.set_velocity(twist)
 
+    def deadband(self, force, threshold):
+        newforce = []
+        for i in range(len(force)):
+            if abs(force[i]) < threshold:
+                newforce.append(0)
+            else:
+                newforce.append(force[i])
+        return newforce
 
-    # Get the current state of the robot (position, velocity)
+    def force2Vector(self, force, header):
+        # force is [x,y,z,rot-x,rot-y,rot-z]
+        # but can also be just [x,y,z] or just [rot-x,rot-y, rot-z]
+        outputVectorStamped = geometry_msgs.msg.Vector3Stamped()
+        #print("ovs is", outputVectorStamped)
+        outputVectorStamped.header = header
+        outputVectorStamped.vector.x = force[0]
+        outputVectorStamped.vector.y = force[1]
+        outputVectorStamped.vector.z = force[2]
 
-    # Get the current force-torques from the sensor
+        return outputVectorStamped # a StampedVector3 message
 
-    # if the force in any direction exceeds the threshold,
-    # set the robot velocity in that direction to a value
-    # proportional to the force in that direction
+    def Vector2Twist(self, header, linearVector, angularVector):
+        # assumes you've split the vector into pieces, puts it together
+        # use this after converting between frames, Twist can not be transformed
+        twistout = geometry_msgs.msg.TwistStamped()
 
-#while stopnow == False:
-#while rospy.is_shutdown
-# twist is a 6DoF (linear x,y,z, angular x,y,z) **velocity**
-# geometry_msgs.msg Twist
-# representing the linear and angular velocity of the controller
+        twistout.header = header
+        twistout.twist.linear = linearVector
+        twistout.twist.angular = angularVector
+        return twistout # a TwistStamped message
+            
 
-#Gen2Teleop.set_velocity(twist) # sets the current twist to be equal to twist
+    def transform_twist(self,input_twist, from_frame, to_frame):
+        # This does not work at all
+        # **Assuming /tf2 topic is being broadcasted
+        tf_buffer = tf2_ros.Buffer()
+        listener = tf2_ros.TransformListener(tf_buffer)
+
+        output_twist = geometry_msgs.msg.Twist()
+
+        try:
+ 
+            
+            return output_twist
+        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+            raise
+
         
 if __name__ == '__main__':
     rospy.init_node('forcetorquecontrol')
     # make an instance of the class, which will also run init
     # and start the subscribers
-    # this_ft_controller = ForceTorqueController()
-    this_controller = JointTorquesController() # instantiate the controller using built-in joint torques
+    this_ft_controller = ForceTorqueController()
+    #this_controller = JointTorquesController() # instantiate the controller using built-in joint torques
 
 
-
-    # teleop = Gen2Teleop(ns="/j2s7s300_driver")
-    # twist = geometry_msgs.msg.Twist()
-    # twist.linear.x = .5
-    # twist.linear.y = 0
-    # twist.linear.z = 0
-    # twist.angular.x = 0
-    # twist.angular.y = 0
-    # twist.angular.z = 0
-
-    
-
-    # stop = geometry_msgs.msg.Twist()
-    # stop.linear.x = 0
-    # stop.linear.y = 0
-    # stop.linear.z = 0
-    # stop.angular.x = 0
-    # stop.angular.y = 0
-    # stop.angular.z = 0
-
-    # teleop.set_velocity(twist)
-    # print("setting velocity to 1x")
-
-    
-    # time.sleep(1)
-
-    # teleop.set_velocity(stop)
-    # print("stopping")
-
-   # this is the last thing, no code after this
     rospy.spin()
 
