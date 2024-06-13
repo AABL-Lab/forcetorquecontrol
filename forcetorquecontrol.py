@@ -38,7 +38,7 @@ class ForceTorqueController:
 
         #        self._bota_listener = rospy.Subscriber("/bus0/bota_ftsensor/ft_sensor_readings/wrench", geometry_msgs.msg.WrenchStamped, self.bota_callback)
         self._rviz_publisher = rospy.Publisher("/visualization_marker", Marker, queue_size = 2)
-        self.twistpublisher = rospy.Publisher("convertedTwistStamped", geometry_msgs.msg.TwistStamped)
+        self.twistpublisher = rospy.Publisher("convertedTwistStamped", geometry_msgs.msg.TwistStamped, queue_size = 2)
         
         # this listens to the data that has been zeroed based on
         # sensor position with the "gravity compensation" package
@@ -51,6 +51,9 @@ class ForceTorqueController:
         self.starttime = rospy.Time.now()
         self._controller_timer = rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
 
+        rospy.Subscriber("/j2s7s300_driver/out/tool_pose", geometry_msgs.msg.PoseStamped, self.check_pose)
+
+        self.pose = geometry_msgs.msg.PoseStamped()
         
          
         # initialize the twist message we will use to move the arm
@@ -150,7 +153,7 @@ class ForceTorqueController:
         return scaledforce
 
     def timer_callback(self, event):
-        print("duration", event.last_duration)
+        #print("duration", event.last_duration)
         #print("The Time since start is ", event.current_real-self.starttime)
         # this is the logic to compare the bota data and
         # set the velocity of the arm appropriately.
@@ -225,6 +228,11 @@ class ForceTorqueController:
 # #            convertedMarker.pose.orientation.z = converted_twist.twist.linear.z
 #             self._rviz_publisher.publish(convertedMarker)
 
+              # Check if the robot is too close to the table
+            #collision_checker_node = StateValidity()
+            #collision_checker_node.start_collision_checker()
+
+
             # this is the part that will make the robot move
             self.teleop.set_velocity(converted_twist.twist)
         
@@ -237,8 +245,10 @@ class ForceTorqueController:
             time.sleep(20)
             #print("Waiting 20 seconds for init")
             self.teleop.set_velocity(self.estop)
-            
-
+            pass
+        
+    def check_pose(self, data):
+        self.pose = data
 
     def deadband(self, force, threshold):
         newforce = []
