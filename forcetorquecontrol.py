@@ -15,12 +15,12 @@ import tf2_ros
 import tf2_geometry_msgs
 from visualization_msgs.msg import Marker
 
-
-global history
-
 #FIXME - talk to Reuben
+global history
 history = [[],[],[],[],[],[]]
 average = [0,0,0,0,0,0]
+## also may not need?
+
 
 class ForceTorqueController:
     def __init__(self, timer_period = .1): # starts when you make the class
