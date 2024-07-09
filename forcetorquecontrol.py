@@ -23,15 +23,22 @@ average = [0,0,0,0,0,0]
 
 
 class ForceTorqueController:
-    def __init__(self, timer_period = .1): # starts when you make the class
+    def __init__(self, timer_period = .1, deadband = 2, scalingfactor = .3, arm_velocity=.5):
         # timer_period is in seconds
+        # arm_velocity is 0-1
 
         self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=False)
         self.tfBuffer = tf2_ros.Buffer()
         self.tflistener = tf2_ros.TransformListener(self.tfBuffer)
+        self.deadband = deadband
+        self.scalingfactor = scalingfactor
+
         
         arm = armpy.arm.Arm()
-        arm.set_velocity(.5)
+        arm.set_velocity(arm_velocity) 
+
+
+        # hard-coded position just above table height with link 7 parallel to the table
         startposition = [4.721493795519453,4.448460661610131,-0.016183561810626166,1.5199463284150871,3.0829157579242956,4.517873824894174,1.57]
         arm.move_to_joint_pose(startposition)
 
@@ -161,7 +168,6 @@ class ForceTorqueController:
             ##print("BotaData is now", self._botadata) # averaged data
             force = [0,0,0,0,0,0]
 
-            # now we do something
 
             force[0]=self._botadata.wrench.force.x
             force[1]=self._botadata.wrench.force.y
@@ -171,8 +177,8 @@ class ForceTorqueController:
             force[5]=self._botadata.wrench.torque.z
 
             #print("force is", force)
-            force = self.deadband(force, 2)
-            scaledforce = self.scaleforce(force, .3)
+            force = self.deadband(force, self.deadband)
+            scaledforce = self.scaleforce(force, self.scalingfactor)
 
             # this creates a desired vector to move along
             # in the frame of reference of the F/T sensor
