@@ -1,0 +1,26 @@
+digraph G {
+"j2s7s300_link_7" -> "bota_ftsensor_wrench"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"j2s7s300_link_6" -> "j2s7s300_link_7"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_7" -> "gripper_base_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"gripper_finger1_knuckle_link" -> "gripper_finger1_finger_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"gripper_base_link" -> "gripper_finger1_knuckle_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"gripper_finger2_knuckle_link" -> "gripper_finger2_finger_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"gripper_base_link" -> "gripper_finger2_knuckle_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_7" -> "j2s7s300_ee_base"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"j2s7s300_ee_base" -> "j2s7s300_ee_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"world" -> "j2s7s300_link_base"[label="Broadcaster: /robot_state_publisher\nAverage rate: 10000.000 Hz\nMost recent transform: 0.000 ( 1715708126.249 sec old)\nBuffer length: 0.000 sec\n"];
+"gripper_finger1_inner_knuckle_link" -> "gripper_finger1_finger_tip_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"gripper_base_link" -> "gripper_finger1_inner_knuckle_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"gripper_finger2_inner_knuckle_link" -> "gripper_finger2_finger_tip_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"gripper_base_link" -> "gripper_finger2_inner_knuckle_link"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_base" -> "j2s7s300_link_1"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_1" -> "j2s7s300_link_2"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_2" -> "j2s7s300_link_3"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_3" -> "j2s7s300_link_4"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_4" -> "j2s7s300_link_5"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+"j2s7s300_link_5" -> "j2s7s300_link_6"[label="Broadcaster: /robot_state_publisher\nAverage rate: 58.953 Hz\nMost recent transform: 1715708126.236 ( 0.014 sec old)\nBuffer length: 4.970 sec\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1715708126.249"[ shape=plaintext ] ;
+ }->"world";
+}

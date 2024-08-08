@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<launch>
+
+  <node name="ft_calib" pkg="force_torque_sensor_calib" type="ft_calib_node" cwd="node" respawn="false" output="screen" >
+    <rosparam command="load" file="$(find forcetorquecontrol)/config/standalone-arm-calib-params.yaml"/>
+    <remap from="/ft_calib/ft_raw" to="/bus0/bota_ftsensor/ft_sensor_readings/wrench"/>
+    <remap from="/ft_calib/imu" to="/bus0/bota_ftsensor/ft_sensor_readings/imu" />
+  </node>
+</launch>
