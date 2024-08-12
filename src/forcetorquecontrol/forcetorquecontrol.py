@@ -23,14 +23,14 @@ average = [0,0,0,0,0,0]
 
 
 class ForceTorqueController:
-    def __init__(self, timer_period = .1, deadband = 2, scalingfactor = .3, arm_velocity=.5):
+    def __init__(self, timer_period = .1, threshold = 2.0, scalingfactor = .3, arm_velocity=.5):
         # timer_period is in seconds
         # arm_velocity is 0-1
 
         self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=False)
         self.tfBuffer = tf2_ros.Buffer()
         self.tflistener = tf2_ros.TransformListener(self.tfBuffer)
-        self.deadband = deadband
+        self.threshold = threshold
         self.scalingfactor = scalingfactor
 
         
@@ -52,7 +52,7 @@ class ForceTorqueController:
         self._bota_listener = rospy.Subscriber("/ft_sensor/ft_compensated", geometry_msgs.msg.WrenchStamped, self.bota_callback)
         #print("started bota listener")
         self._arm_listener = rospy.Subscriber("/j2s7s300_driver/out/joint_state", sensor_msgs.msg.JointState, self.joint_state_callback)
-        #print("started armstate listener")
+       #print("started armstate listener")
         self.counter = 0
         self.botacounter = 0
         self.starttime = rospy.Time.now()
@@ -160,12 +160,13 @@ class ForceTorqueController:
         return scaledforce
 
     def timer_callback(self, event):
-        #print("duration", event.last_duration)
+        #if event.last_duration:
+        #    print("duration", round(event.last_duration, 4))
         #print("The Time since start is ", event.current_real-self.starttime)
         # this is the logic to compare the bota data and
         # set the velocity of the arm appropriately.
         try:
-            ##print("BotaData is now", self._botadata) # averaged data
+            #print("BotaData is now", self._botadata) # averaged data
             force = [0,0,0,0,0,0]
 
 
@@ -177,16 +178,19 @@ class ForceTorqueController:
             force[5]=self._botadata.wrench.torque.z
 
             #print("force is", force)
-            force = self.deadband(force, self.deadband)
+            force = self.deadband(force, self.threshold)
+            #print("deadband done")
             scaledforce = self.scaleforce(force, self.scalingfactor)
-
+            #print("force scaled")
             # this creates a desired vector to move along
             # in the frame of reference of the F/T sensor
             # based on the force inputs
             
             outputvectorstamped = self.force2Vector(scaledforce, self._botadata.header)
-            ##print("output vector in original frame", outputvectorstamped)
+            #print("output vector in original frame", outputvectorstamped)
             torques = self.force2Vector([0,0,0], self._botadata.header)
+            # currently ignoring torque, comment line above and
+            #uncomment line below to use torque
             #torques = self.force2Vector([scaledforce[3],scaledforce[4], scaledforce[5]], self._botadata.header) 
 
 
@@ -194,10 +198,11 @@ class ForceTorqueController:
             # This converts it to the base frame, which is needed for
             # Kinova velocity control (the Twist command we will make)
             # and returns the output vector in the base frame
-
+            #print("just before frame transform")
             outputvectorstamped_base = self.tfBuffer.transform(outputvectorstamped,"j2s7s300_link_base",timeout=rospy.Duration(1))
-            ##print("just after frame transform", outputvectorstamped_base)
-            # This converts the base-frame output vector
+            #print("just after frame transform", outputvectorstamped_base)
+
+            #This converts the base-frame output vector
             # into Twist translation commands
             converted_twist = self.Vector2Twist(outputvectorstamped_base.header, outputvectorstamped_base.vector, torques.vector) #TwistStamped
             converted_twist.header.stamp=rospy.get_rostime()
@@ -205,8 +210,9 @@ class ForceTorqueController:
             # publish the converted twist header to ROS
             self.twistpublisher.publish(converted_twist)
             
-#             ##print("The velocity twist command I would send is", converted_twist)
-#             convertedMarker = Marker()
+            #print("The velocity twist command I would send is", converted_twist)
+
+           #             convertedMarker = Marker()
 #             convertedMarker.type = Marker.ARROW
 #             convertedMarker.header=converted_twist.header
 #             convertedMarker.id = 1
@@ -289,20 +295,6 @@ class ForceTorqueController:
         return twistout # a TwistStamped message
             
 
-    def transform_twist(self,input_twist, from_frame, to_frame):
-        # This does not work at all
-        # **Assuming /tf2 topic is being broadcasted
-        tf_buffer = tf2_ros.Buffer()
-        listener = tf2_ros.TransformListener(tf_buffer)
-
-        output_twist = geometry_msgs.msg.Twist()
-
-        try:
- 
-            
-            return output_twist
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-            raise
 
         
 if __name__ == '__main__':
