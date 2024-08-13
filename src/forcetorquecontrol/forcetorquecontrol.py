@@ -27,7 +27,7 @@ class ForceTorqueController:
         # timer_period is in seconds
         # arm_velocity is 0-1
 
-        self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=False)
+        self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=True)
         self.tfBuffer = tf2_ros.Buffer()
         self.tflistener = tf2_ros.TransformListener(self.tfBuffer)
         self.threshold = threshold
@@ -178,7 +178,7 @@ class ForceTorqueController:
             force[5]=self._botadata.wrench.torque.z
 
             #print("force is", force)
-            force = self.deadband(force, self.threshold)
+            force = self.deadband_fxn(force, self.threshold)
             #print("deadband done")
             scaledforce = self.scaleforce(force, self.scalingfactor)
             #print("force scaled")
@@ -210,7 +210,7 @@ class ForceTorqueController:
             # publish the converted twist header to ROS
             self.twistpublisher.publish(converted_twist)
             
-            #print("The velocity twist command I would send is", converted_twist)
+            print("The velocity twist command I would send is", converted_twist)
 
            #             convertedMarker = Marker()
 #             convertedMarker.type = Marker.ARROW
@@ -247,13 +247,11 @@ class ForceTorqueController:
 
             # this is the part that will make the robot move
             self.teleop.set_velocity(converted_twist.twist)
-        
-
-        
+           
             
         except Exception as e:
-            #print("exception is", e)
-            #print(traceback.format_exc())
+            print("exception is", e)
+            print(traceback.format_exc())
             time.sleep(20)
             #print("Waiting 20 seconds for init")
             self.teleop.set_velocity(self.estop)
@@ -262,7 +260,7 @@ class ForceTorqueController:
     def check_pose(self, data):
         self.pose = data
 
-    def deadband(self, force, threshold):
+    def deadband_fxn(self, force, threshold):
         newforce = []
         for i in range(len(force)):
             if abs(force[i]) < threshold:
@@ -293,8 +291,6 @@ class ForceTorqueController:
         twistout.twist.linear = linearVector
         twistout.twist.angular = angularVector
         return twistout # a TwistStamped message
-            
-
 
         
 if __name__ == '__main__':
@@ -303,7 +299,6 @@ if __name__ == '__main__':
     # and start the subscribers
     this_ft_controller = ForceTorqueController()
     #this_controller = JointTorquesController() # instantiate the controller using built-in joint torques
-
-
     rospy.spin()
+
 
