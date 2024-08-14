@@ -27,20 +27,20 @@ class ForceTorqueController:
         # timer_period is in seconds
         # arm_velocity is 0-1
 
-        self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=True)
+        self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=False)
         self.tfBuffer = tf2_ros.Buffer()
         self.tflistener = tf2_ros.TransformListener(self.tfBuffer)
         self.threshold = threshold
         self.scalingfactor = scalingfactor
-
+        self.timer_period = timer_period
         
         arm = armpy.arm.Arm()
         arm.set_velocity(arm_velocity) 
 
 
         # hard-coded position just above table height with link 7 parallel to the table
-        startposition = [4.721493795519453,4.448460661610131,-0.016183561810626166,1.5199463284150871,3.0829157579242956,4.517873824894174,1.57]
-        arm.move_to_joint_pose(startposition)
+#        startposition = [4.721493795519453,4.448460661610131,-0.016183561810626166,1.5199463284150871,3.0829157579242956,4.517873824894174,1.57]
+#        arm.move_to_joint_pose(startposition)
 
 
         #        self._bota_listener = rospy.Subscriber("/bus0/bota_ftsensor/ft_sensor_readings/wrench", geometry_msgs.msg.WrenchStamped, self.bota_callback)
@@ -56,7 +56,7 @@ class ForceTorqueController:
         self.counter = 0
         self.botacounter = 0
         self.starttime = rospy.Time.now()
-        self._controller_timer = rospy.Timer(rospy.Duration(timer_period), self.timer_callback)
+
 
         rospy.Subscriber("/j2s7s300_driver/out/tool_pose", geometry_msgs.msg.PoseStamped, self.check_pose)
 
@@ -210,7 +210,7 @@ class ForceTorqueController:
             # publish the converted twist header to ROS
             self.twistpublisher.publish(converted_twist)
             
-            print("The velocity twist command I would send is", converted_twist)
+            #print("The velocity twist command I would send is", converted_twist)
 
            #             convertedMarker = Marker()
 #             convertedMarker.type = Marker.ARROW
@@ -292,13 +292,21 @@ class ForceTorqueController:
         twistout.twist.angular = angularVector
         return twistout # a TwistStamped message
 
+    def stop(self):
+        self._controller_timer.shutdown()
+
+    def start(self):
+        self._controller_timer = rospy.Timer(rospy.Duration(self.timer_period), self.timer_callback)
+        
         
 if __name__ == '__main__':
     rospy.init_node('forcetorquecontrol')
     # make an instance of the class, which will also run init
     # and start the subscribers
     this_ft_controller = ForceTorqueController()
+    this_ft_controller.start()
     #this_controller = JointTorquesController() # instantiate the controller using built-in joint torques
     rospy.spin()
+    this_ft_controller.stop()
 
 
