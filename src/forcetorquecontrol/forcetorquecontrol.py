@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import math
-from armpy.gen2_teleop import Gen2Teleop
+
+from simple_pid import PID
 import rospy
 import kinova_msgs.msg
 import sensor_msgs.msg
@@ -14,36 +15,37 @@ import armpy
 import tf2_ros
 import tf2_geometry_msgs
 from visualization_msgs.msg import Marker
+from kinova_msgs.msg import PoseVelocity
+from kinova_msgs.srv import Start, Stop, HomeArm
 
-#FIXME - talk to Reuben
-global history
-history = [[],[],[],[],[],[]]
-average = [0,0,0,0,0,0]
-## also may not need?
-
+DEFAULT_ROBOT_NS = "/j2s7s300_driver"
+CARTESIAN_VEL_TOPIC = "/in/cartesian_velocity"
+START_SERVICE = "/in/start"
+STOP_SERVICE = "/in/stop"
+HOME_ARM_SERVICE = "/in/home_arm"
 
 class ForceTorqueController:
-    def __init__(self, timer_period = .1, threshold = 2.0, scalingfactor = .3, arm_velocity=.5):
+    def __init__(self, threshold = 2.0, scalingfactor = .3, K_P=1.0, K_D=1.0, arm_velocity=.5, controltype="P"):
         # timer_period is in seconds
         # arm_velocity is 0-1
+        if controltype=="PD":
+            print("Controller type is ",controltype, "with K_P ", K_P, "and K_D ", K_D)
+        ns = rospy.resolve_name(DEFAULT_ROBOT_NS)
 
-        self.teleop = Gen2Teleop(ns="/j2s7s300_driver", home_arm=False)
         self.tfBuffer = tf2_ros.Buffer()
         self.tflistener = tf2_ros.TransformListener(self.tfBuffer)
         self.threshold = threshold
         self.scalingfactor = scalingfactor
-        self.timer_period = timer_period
-        
+        self.K_P = K_P
+        self.K_D = K_D
+        self.timer_period = .01 # must be 100Hz for Kinova arm
+        self._command = None
         arm = armpy.arm.Arm()
-        arm.set_velocity(arm_velocity) 
+        arm.set_velocity(arm_velocity)
+        self._started = False
+        self.controller_timer = None
+        self.controltype=controltype
 
-
-        # hard-coded position just above table height with link 7 parallel to the table
-#        startposition = [4.721493795519453,4.448460661610131,-0.016183561810626166,1.5199463284150871,3.0829157579242956,4.517873824894174,1.57]
-#        arm.move_to_joint_pose(startposition)
-
-
-        #        self._bota_listener = rospy.Subscriber("/bus0/bota_ftsensor/ft_sensor_readings/wrench", geometry_msgs.msg.WrenchStamped, self.bota_callback)
         self._rviz_publisher = rospy.Publisher("/visualization_marker", Marker, queue_size = 2)
         self.twistpublisher = rospy.Publisher("convertedTwistStamped", geometry_msgs.msg.TwistStamped, queue_size = 2)
         
@@ -52,6 +54,8 @@ class ForceTorqueController:
         self._bota_listener = rospy.Subscriber("/ft_sensor/ft_compensated", geometry_msgs.msg.WrenchStamped, self.bota_callback)
         #print("started bota listener")
         self._arm_listener = rospy.Subscriber("/j2s7s300_driver/out/joint_state", sensor_msgs.msg.JointState, self.joint_state_callback)
+        # this will publish cartesian velocities to the Kinova arm
+        self._cart_vel_pub = rospy.Publisher(ns + CARTESIAN_VEL_TOPIC, PoseVelocity, queue_size=1)
        #print("started armstate listener")
         self.counter = 0
         self.botacounter = 0
@@ -83,6 +87,42 @@ class ForceTorqueController:
         self.estop.angular.y = 0
         self.estop.angular.z = 0
 
+    def set_velocity(self, thistwist):
+        """
+        Attributes
+        ----------
+        twist : geometry_msgs.msg Twist
+            The linear and angular velocity of controller
+
+        Can take both Twist and TwistStamped
+        """
+
+        
+        if not self._started:
+            self.start()
+            self._started = True
+            
+        try:     
+            self._command = PoseVelocity(
+                twist_linear_x = thistwist.twist.linear.x,
+                twist_linear_y = thistwist.twist.linear.y,
+                twist_linear_z = thistwist.twist.linear.z,
+                twist_angular_x = thistwist.twist.angular.x,
+                twist_angular_y = thistwist.twist.angular.y,
+                twist_angular_z = thistwist.twist.angular.z
+            )
+        except AttributeError:
+            self._command = PoseVelocity(
+                twist_linear_x = thistwist.linear.x,
+                twist_linear_y = thistwist.linear.y,
+                twist_linear_z = thistwist.linear.z,
+                twist_angular_x = thistwist.angular.x,
+                twist_angular_y = thistwist.angular.y,
+                twist_angular_z = thistwist.angular.z
+            )
+#        if not self.controller_timer:
+#            # Timer must be 0.1 because Gen2 requires velocity commands at 100Hz
+#            self.controller_timer = rospy.Timer(rospy.Duration(0.01), self.timer_callback, oneshot=False)
 
         
     def bota_callback(self, msg):
@@ -154,9 +194,17 @@ class ForceTorqueController:
 #            self.counter = 0
         self._jointdata = data
 
-    def scaleforce(self, force, scalingfactor):
-        scaledforce = [scalingfactor*x for x in force]
-        #print("scaledforce is ", scaledforce)
+    def force_controller(self, force):
+        if self.controltype=="P":
+            scaledforce = [self.scalingfactor*x for x in force]
+        elif self.controltype=="PD":
+            pidx = PID(self.K_P,1, self.K_D)
+            pidy = PID(self.K_P, 1, self.K_D)
+            pidz = PID(self.K_P, 1, self.K_D)
+            scaledforce = [pidx(force[0]), pidy(force[1]), pidx(force[2])]
+
+        else:
+            print(self.controltype, "is not a supported controller")
         return scaledforce
 
     def timer_callback(self, event):
@@ -166,7 +214,7 @@ class ForceTorqueController:
         # this is the logic to compare the bota data and
         # set the velocity of the arm appropriately.
         try:
-            #print("BotaData is now", self._botadata) # averaged data
+
             force = [0,0,0,0,0,0]
 
 
@@ -180,8 +228,10 @@ class ForceTorqueController:
             #print("force is", force)
             force = self.deadband_fxn(force, self.threshold)
             #print("deadband done")
-            scaledforce = self.scaleforce(force, self.scalingfactor)
-            #print("force scaled")
+            
+            scaledforce = self.force_controller(force) # control params are class variables
+
+#            print("force scaled,", scaledforce)
             # this creates a desired vector to move along
             # in the frame of reference of the F/T sensor
             # based on the force inputs
@@ -208,7 +258,8 @@ class ForceTorqueController:
             converted_twist.header.stamp=rospy.get_rostime()
 
             # publish the converted twist header to ROS
-            self.twistpublisher.publish(converted_twist)
+            self.set_velocity(converted_twist) # updates self._command
+            self._cart_vel_pub.publish(self._command)
             
             #print("The velocity twist command I would send is", converted_twist)
 
@@ -246,15 +297,15 @@ class ForceTorqueController:
 
 
             # this is the part that will make the robot move
-            self.teleop.set_velocity(converted_twist.twist)
+            self.set_velocity(converted_twist.twist)
            
             
-        except Exception as e:
+        except AttributeError as e:
             print("exception is", e)
             print(traceback.format_exc())
             time.sleep(20)
             #print("Waiting 20 seconds for init")
-            self.teleop.set_velocity(self.estop)
+            self.set_velocity(self.estop)
             pass
         
     def check_pose(self, data):
@@ -294,6 +345,8 @@ class ForceTorqueController:
 
     def stop(self):
         self._controller_timer.shutdown()
+        print("Controller timer shut down sent")
+        self.twistpublisher.unregister()
 
     def start(self):
         self._controller_timer = rospy.Timer(rospy.Duration(self.timer_period), self.timer_callback)
@@ -303,10 +356,12 @@ if __name__ == '__main__':
     rospy.init_node('forcetorquecontrol')
     # make an instance of the class, which will also run init
     # and start the subscribers
-    this_ft_controller = ForceTorqueController()
+    this_ft_controller = ForceTorqueController(controltype="PD",
+                                               K_P=-4.0, K_D=50.0)
     this_ft_controller.start()
     #this_controller = JointTorquesController() # instantiate the controller using built-in joint torques
     rospy.spin()
     this_ft_controller.stop()
 
 
+    
