@@ -208,7 +208,7 @@ class ForceTorqueController:
         return scaledforce
 
     def timer_callback(self, event):
-        rospy.loginfo("callback start")
+        #rospy.loginfo("callback start")
         #if event.last_duration:
         #    print("duration", round(event.last_duration, 4))
         #print("The Time since start is ", event.current_real-self.starttime)
@@ -249,7 +249,7 @@ class ForceTorqueController:
             # This converts it to the base frame, which is needed for
             # Kinova velocity control (the Twist command we will make)
             # and returns the output vector in the base frame
-            rospy.loginfo("just before frame transform")
+            #rospy.loginfo("just before frame transform")
             try:
                 transform = self.tfBuffer.lookup_transform_core(outputvectorstamped.header.frame_id,"j2s7s300_link_base", rospy.Time())
             except tf2_ros.LookupException:
@@ -262,7 +262,7 @@ class ForceTorqueController:
             do_transform = self.tfBuffer.registration.get(type(outputvectorstamped))
             outputvectorstamped_base = do_transform(outputvectorstamped, transform)
             
-            rospy.loginfo("just after frame transform")
+            #rospy.loginfo("just after frame transform")
             
             #This converts the base-frame output vector
             # into Twist translation commands
@@ -310,7 +310,7 @@ class ForceTorqueController:
 
             # this is the part that will make the robot move
             self.set_velocity(converted_twist.twist)
-            rospy.loginfo("end of the timer callback")
+            #rospy.loginfo("end of the timer callback")
             
         except AttributeError as e:
             print("exception is", e)
