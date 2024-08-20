@@ -43,7 +43,7 @@ class ForceTorqueController:
         arm = armpy.arm.Arm()
         arm.set_velocity(arm_velocity)
         self._started = False
-        self.controller_timer = None
+        self._controller_timer = None
         self.controltype=controltype
 
         self._rviz_publisher = rospy.Publisher("/visualization_marker", Marker, queue_size = 2)
@@ -208,6 +208,7 @@ class ForceTorqueController:
         return scaledforce
 
     def timer_callback(self, event):
+        rospy.loginfo("callback start")
         #if event.last_duration:
         #    print("duration", round(event.last_duration, 4))
         #print("The Time since start is ", event.current_real-self.starttime)
@@ -227,11 +228,11 @@ class ForceTorqueController:
 
             #print("force is", force)
             force = self.deadband_fxn(force, self.threshold)
-            #print("deadband done")
+            #rospy.loginfo("deadband done")
             
             scaledforce = self.force_controller(force) # control params are class variables
 
-#            print("force scaled,", scaledforce)
+            #rospy.loginfo("force scaled,", scaledforce)
             # this creates a desired vector to move along
             # in the frame of reference of the F/T sensor
             # based on the force inputs
@@ -248,10 +249,21 @@ class ForceTorqueController:
             # This converts it to the base frame, which is needed for
             # Kinova velocity control (the Twist command we will make)
             # and returns the output vector in the base frame
-            #print("just before frame transform")
-            outputvectorstamped_base = self.tfBuffer.transform(outputvectorstamped,"j2s7s300_link_base",timeout=rospy.Duration(1))
-            #print("just after frame transform", outputvectorstamped_base)
+            rospy.loginfo("just before frame transform")
+            try:
+                transform = self.tfBuffer.lookup_transform_core(outputvectorstamped.header.frame_id,"j2s7s300_link_base", rospy.Time())
+            except tf2_ros.LookupException:
+                rospy.logwarn("can not look up transform")
+                return
+            except tf2_ros.ExtrapolationException as e:
+                rospy.logwarn(f"timing error {e}")
+                return
 
+            do_transform = self.tfBuffer.registration.get(type(outputvectorstamped))
+            outputvectorstamped_base = do_transform(outputvectorstamped, transform)
+            
+            rospy.loginfo("just after frame transform")
+            
             #This converts the base-frame output vector
             # into Twist translation commands
             converted_twist = self.Vector2Twist(outputvectorstamped_base.header, outputvectorstamped_base.vector, torques.vector) #TwistStamped
@@ -298,7 +310,7 @@ class ForceTorqueController:
 
             # this is the part that will make the robot move
             self.set_velocity(converted_twist.twist)
-           
+            rospy.loginfo("end of the timer callback")
             
         except AttributeError as e:
             print("exception is", e)
@@ -349,15 +361,21 @@ class ForceTorqueController:
         self.twistpublisher.unregister()
 
     def start(self):
+        if self._controller_timer!=None:
+            self._controller_timer.shutdown()
+    
         self._controller_timer = rospy.Timer(rospy.Duration(self.timer_period), self.timer_callback)
         
-        
+
 if __name__ == '__main__':
     rospy.init_node('forcetorquecontrol')
     # make an instance of the class, which will also run init
     # and start the subscribers
     this_ft_controller = ForceTorqueController(controltype="PD",
-                                               K_P=-4.0, K_D=50.0)
+                                               K_P=-400.0, K_D=50.0)
+    #this_ft_controller = ForceTorqueController(controltype="P",
+    #                                           K_P=-400.0)
+
     this_ft_controller.start()
     #this_controller = JointTorquesController() # instantiate the controller using built-in joint torques
     rospy.spin()
