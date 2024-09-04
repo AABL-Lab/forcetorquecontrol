@@ -251,7 +251,8 @@ class ForceTorqueController:
 
             # publish the converted twist header to ROS
             self.set_velocity(converted_twist) # updates self._command, turns twist into PoseVelocity
-            #self._cart_vel_pub.publish(self._command)  # publishes command for Kinova to pick up
+
+            self._cart_vel_pub.publish(self._command)  # publishes command for Kinova to pick up
             if self.print==True:
                 print("command sent", self._command)
             self.print=False
