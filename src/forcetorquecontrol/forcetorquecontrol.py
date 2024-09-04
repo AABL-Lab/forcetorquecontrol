@@ -327,7 +327,7 @@ if __name__ == '__main__':
     # make an instance of the class, which will also run init
     # and start the subscribers
     this_ft_controller = ForceTorqueController(controltype="PD",
-                                               K_P=-4.0, K_D=-5.0, threshold=3.0)
+                                               K_P=-30.0, K_D=-3.0, threshold=3.0)
     #this_ft_controller = ForceTorqueController(controltype="P",
     #                                           K_P=-400.0)
 
