@@ -45,7 +45,9 @@ class ForceTorqueController:
         self._started = False
         self._controller_timer = None
         self.controltype=controltype
-        self.robot_base_link = "base_link"
+        self.robot_base_link = "j2s7s300_link_base"
+        #self.robot_base_link = "base_link"
+        self.print = False #this is for debugging, True if force > threshold in any direction
         self._rviz_publisher = rospy.Publisher("/visualization_marker", Marker, queue_size = 2)
         self.twistpublisher = rospy.Publisher("convertedTwistStamped", geometry_msgs.msg.TwistStamped, queue_size = 2)
         
@@ -101,7 +103,7 @@ class ForceTorqueController:
             self.start()
             self._started = True
             
-        try:     
+        try:  # for TwistStamped   
             self._command = PoseVelocity(
                 twist_linear_x = thistwist.twist.linear.x,
                 twist_linear_y = thistwist.twist.linear.y,
@@ -110,7 +112,7 @@ class ForceTorqueController:
                 twist_angular_y = thistwist.twist.angular.y,
                 twist_angular_z = thistwist.twist.angular.z
             )
-        except AttributeError:
+        except AttributeError: # for Twist
             self._command = PoseVelocity(
                 twist_linear_x = thistwist.linear.x,
                 twist_linear_y = thistwist.linear.y,
@@ -119,9 +121,6 @@ class ForceTorqueController:
                 twist_angular_y = thistwist.angular.y,
                 twist_angular_z = thistwist.angular.z
             )
-#        if not self.controller_timer:
-#            # Timer must be 0.1 because Gen2 requires velocity commands at 100Hz
-#            self.controller_timer = rospy.Timer(rospy.Duration(0.01), self.timer_callback, oneshot=False)
 
         
     def bota_callback(self, msg):
@@ -155,6 +154,12 @@ class ForceTorqueController:
         # self._botadata.wrench.torque.y=average[4]
         # self._botadata.wrench.torque.z=average[5]
         ##print("Botadata from inside callback", self._botadata)
+
+
+        ##########################################################
+        #This section sets up a marker showing the
+        # vector of the force-torque data
+        ########################################################
         botamarker = Marker()
         botamarker.type = 0
         botamarker.ns = "botamarker"
@@ -176,7 +181,7 @@ class ForceTorqueController:
         botamarker.color.a = 1
         # #
         self._rviz_publisher.publish(botamarker)
-
+        ############################################################
         
     def joint_state_callback(self, data):
         # the data comes in as sensor_msgs/JointState.msg
@@ -200,7 +205,8 @@ class ForceTorqueController:
             pidx = PID(self.K_P,1, self.K_D)
             pidy = PID(self.K_P, 1, self.K_D)
             pidz = PID(self.K_P, 1, self.K_D)
-            scaledforce = [pidx(force[0]), pidy(force[1]), pidx(force[2])]
+            scaledforce = [pidx(force[0]), pidy(force[1]), pidz(force[2])]
+
 
         else:
             print(self.controltype, "is not a supported controller")
@@ -224,14 +230,17 @@ class ForceTorqueController:
             force[3]=self._botadata.wrench.torque.x
             force[4]=self._botadata.wrench.torque.y
             force[5]=self._botadata.wrench.torque.z
-
-            #print("force is", force)
+            if self.print==True:
+                rospy.loginfo("force is %s", force)
             force = self.deadband_fxn(force, self.threshold)
             #rospy.loginfo("deadband done")
             
             scaledforce = self.force_controller(force) # control params are class variables
-
-            #rospy.loginfo("force scaled,", scaledforce)
+            if self.print==True:
+                print("========================================timercallbackstart======")
+      
+            if self.print==True:
+                rospy.loginfo("force scaled is %s", scaledforce)
             # this creates a desired vector to move along
             # in the frame of reference of the F/T sensor
             # based on the force inputs
@@ -243,14 +252,15 @@ class ForceTorqueController:
             #uncomment line below to use torque
             #torques = self.force2Vector([scaledforce[3],scaledforce[4], scaledforce[5]], self._botadata.header) 
 
-
-
             # This converts it to the base frame, which is needed for
             # Kinova velocity control (the Twist command we will make)
             # and returns the output vector in the base frame
             #rospy.loginfo("just before frame transform")
             try:
-                transform = self.tfBuffer.lookup_transform_core(outputvectorstamped.header.frame_id, self.robot_base_link, rospy.Time())
+                if self.print==True:
+                    print("Transform from", outputvectorstamped.header.frame_id, "to", self.robot_base_link)
+#                transform = self.tfBuffer.lookup_transform_core(outputvectorstamped.header.frame_id, self.robot_base_link, rospy.Time())
+                transform = self.tfBuffer.lookup_transform_core(self.robot_base_link, outputvectorstamped.header.frame_id,  rospy.Time())
             except tf2_ros.LookupException:
                 rospy.logwarn("can not look up transform")
                 return
@@ -260,6 +270,8 @@ class ForceTorqueController:
 
             do_transform = self.tfBuffer.registration.get(type(outputvectorstamped))
             outputvectorstamped_base = do_transform(outputvectorstamped, transform)
+            if self.print==True:
+                print(outputvectorstamped_base)
             
             #rospy.loginfo("just after frame transform")
             
@@ -267,14 +279,19 @@ class ForceTorqueController:
             # into Twist translation commands
             converted_twist = self.Vector2Twist(outputvectorstamped_base.header, outputvectorstamped_base.vector, torques.vector) #TwistStamped
             converted_twist.header.stamp=rospy.get_rostime()
+            converted_twist.header.frame_id="j2s7s300_link_base"
 
             # publish the converted twist header to ROS
-            self.set_velocity(converted_twist) # updates self._command
-            self._cart_vel_pub.publish(self._command)
-
-            
-            print("The velocity twist command I would send is", converted_twist, force)
-
+            self.set_velocity(converted_twist) # updates self._command, turns twist into PoseVelocity
+            #self._cart_vel_pub.publish(self._command)  # publishes command for Kinova to pick up
+            if self.print==True:
+                print("command sent", self._command)
+            self.print=False
+            #print("The velocity twist command I would send is", converted_twist, force)
+            #######################################################
+            ## This makes a marker of the converted data that is
+            ## being sent as a velocity command
+            ######################################################
             convertedMarker = Marker()
             convertedMarker.type = Marker.ARROW
             convertedMarker.header=converted_twist.header
@@ -302,21 +319,21 @@ class ForceTorqueController:
             convertedMarker.pose.orientation.y = converted_twist.twist.linear.y
             convertedMarker.pose.orientation.z = converted_twist.twist.linear.z
             self._rviz_publisher.publish(convertedMarker)
-
+            #####################################################
+            ## End of the marker block
+            ####################################################
+            
               # Check if the robot is too close to the table
             #collision_checker_node = StateValidity()
             #collision_checker_node.start_collision_checker()
 
-
-            # this is the part that will make the robot move
-            self.set_velocity(converted_twist.twist)
             #rospy.loginfo("end of the timer callback")
             
         except AttributeError as e:
             print("exception is", e)
             print(traceback.format_exc())
-            time.sleep(20)
-            #print("Waiting 20 seconds for init")
+            time.sleep(5)
+            print("Waiting 5 seconds for init")
             self.set_velocity(self.estop)
             pass
         
@@ -325,12 +342,14 @@ class ForceTorqueController:
         self.pose = data
 
     def deadband_fxn(self, force, threshold):
+        self.commandfound=False
         newforce = []
         for i in range(len(force)):
             if abs(force[i]) < threshold:
                 newforce.append(0)
             else:
                 newforce.append(force[i])
+                self.print=True
         #print("newforce is", newforce)
         return newforce
 
@@ -373,7 +392,7 @@ if __name__ == '__main__':
     # make an instance of the class, which will also run init
     # and start the subscribers
     this_ft_controller = ForceTorqueController(controltype="PD",
-                                               K_P=-4.0, K_D=-5.0, threshold=5.0)
+                                               K_P=-4.0, K_D=-5.0, threshold=3.0)
     #this_ft_controller = ForceTorqueController(controltype="P",
     #                                           K_P=-400.0)
 
